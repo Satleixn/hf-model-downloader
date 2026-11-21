@@ -24,10 +24,11 @@ A lightweight, zero-bloat desktop GUI tool for downloading **any Hugging Face mo
 ## Quick Start
 
 ### Option 1: Standalone Windows EXE (No Python Required)
-Download **`HF-Model-Downloader-v1.0.0-win64.exe`** from the [Releases](https://github.com/Satleixn/hf-model-downloader/releases) page and double-click to launch.
+Download **`HF-Model-Downloader-v1.0.1-win64.exe`** from the [Releases](https://github.com/Satleixn/hf-model-downloader/releases) page and double-click to launch.
 
 - Default save directory: `C:\Users\<User>\Downloads`
 - Your chosen folder via **Browse...** is remembered automatically; if a remembered folder no longer exists, the app will prompt you to select a new one.
+- Built in a clean isolated environment **without UPX** (to minimize antivirus false positives), with Windows PE version metadata and SHA-256 checksums published on every release. You can also build it yourself with `python packaging/build_exe.py`.
 
 ### Option 2: Run from Source
 - Requirements: Python 3.9+ (with built-in `tkinter`) and `requests` (`pip install -r requirements.txt`)

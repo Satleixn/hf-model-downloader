@@ -24,10 +24,11 @@
 ## 快速开始
 
 ### 方式一：直接下载 Windows 独立 EXE（免装 Python，一键启动）
-前往 [Releases](https://github.com/Satleixn/hf-model-downloader/releases) 页面下载 **`HF-Model-Downloader-v1.0.0-win64.exe`**，双击即可直接运行。
+前往 [Releases](https://github.com/Satleixn/hf-model-downloader/releases) 页面下载 **`HF-Model-Downloader-v1.0.1-win64.exe`**，双击即可直接运行。
 
 - 默认保存目录：`C:\Users\<用户名>\Downloads`（C 盘下载文件夹）
 - 点击 **浏览...** 选择目录后会自动记住；若下次打开或下载时该路径不存在，会自动弹窗提示重新选择。
+- 采用干净隔离环境构建且**不使用 UPX 压缩**（最大程度降低杀毒软件误报），附带完整版本元数据与官方 SHA-256 校验值；也可运行 `python packaging/build_exe.py` 自行本地构建。
 
 ### 方式二：从源码运行
 - 环境要求：Python 3.9+（自带 `tkinter`）与 `requests`（`pip install -r requirements.txt`）
