@@ -1,15 +1,20 @@
 # Hugging Face Model Downloader (GUI)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB.svg)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Cross--Platform-lightgrey.svg)](#quick-start)
+
 [English](README.md) | [中文说明](README_CN.md)
 
-A lightweight, zero-bloat desktop GUI tool for downloading **any Hugging Face model repository** with true HTTP Range pause/resume, one-click retry for failed files, and official SHA-256 / Git Blob SHA-1 integrity verification with a live progress bar.
+A lightweight, zero-bloat desktop GUI tool for downloading **any Hugging Face model repository** with true HTTP Range pause/resume, one-click retry for failed files, official SHA-256 / Git Blob SHA-1 integrity verification with a live progress bar, and instant Chinese/English UI switching.
 
 ## Features
 
 - **Any Hugging Face Model URL**: Paste a model homepage URL (e.g., `https://huggingface.co/owner/model`), a branch URL (`/tree/<revision>`), a mirror URL (`https://hf-mirror.com/...`), or a plain `owner/model` repo ID.
+- **Live Bilingual UI (`中文` / `English`)**: Built-in top-right language switcher dropdown (defaults to Chinese; switches the entire interface live without restarting).
 - **True Pause / Resume / Stop**: Uses chunked HTTP `Range` streaming with `.part` temporary files. Pausing or closing the app preserves downloaded bytes and resumes cleanly from the exact offset.
-- **One-Click Retry Failed (`🔄 重试失败`)**: Automatically tracks failed downloads and SHA-mismatched files so you can re-download only the broken or failed files with a single click.
-- **One-Click Official SHA Verification (`✔ 校验 SHA`)**:
+- **One-Click Retry Failed (`Retry Failed`)**: Automatically tracks failed downloads and SHA-mismatched files so you can re-download only the broken or failed files with a single click.
+- **One-Click Official SHA Verification (`Verify SHA`)**:
   - Multi-threaded verification with a dedicated **visual progress bar** (percentage, verified GB, read throughput in MB/s, ETA, and per-file status).
   - Compares **LFS files** against official `lfs.sha256` (SHA-256) and **non-LFS files** against official `blobId` (Git Blob SHA-1).
   - Works both right after download and standalone on any existing local model directory.
@@ -33,7 +38,7 @@ python app.py
 
 Optional CLI arguments:
 ```bash
-python app.py --url "https://huggingface.co/owner/model" --dir "H:\Models" --autostart
+python app.py --url "https://huggingface.co/owner/model" --dir "H:\Models" --lang en --autostart
 ```
 
 ## Project Structure
@@ -47,6 +52,7 @@ hf-model-downloader/
 │   ├── hf_parser.py    # Hugging Face URL/ID parser & API metadata client
 │   ├── downloader.py   # Multi-threaded resumable download engine + retry failed
 │   ├── verifier.py     # Multi-threaded official SHA-256 / SHA-1 verifier
+│   ├── i18n.py         # Chinese / English live UI translations
 │   └── gui.py          # Tkinter desktop interface
 └── tests/              # Unit & local HTTP integration tests
 ```
@@ -59,4 +65,10 @@ python -m unittest discover -s tests -v
 
 ## License
 
-[MIT](LICENSE)
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for full details.
+
+## Disclaimer
+
+- This project is an independent open-source utility and is **not affiliated with, endorsed by, or officially connected to Hugging Face, Inc.**
+- Users are solely responsible for complying with the license terms, usage policies, access restrictions (including gated model agreements), and applicable local laws and regulations for any model or file downloaded with this tool.
+- This software is provided **"AS IS"**, without warranty of any kind, express or implied. The authors and contributors assume no liability for any data loss, network/storage costs, or misuse arising from the use of this software.
