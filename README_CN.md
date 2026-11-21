@@ -23,14 +23,16 @@
 
 ## 快速开始
 
-### 环境要求
-- Python 3.9+（自带 `tkinter`）
-- `requests`（`pip install -r requirements.txt`）
+### 方式一：直接下载 Windows 独立 EXE（免装 Python，一键启动）
+前往 [Releases](https://github.com/Satleixn/hf-model-downloader/releases) 页面下载 **`HF-Model-Downloader-v1.0.0-win64.exe`**，双击即可直接运行。
 
-### Windows 一键启动
-直接双击项目根目录的 **`start.bat`** 即可运行。
+- 默认保存目录：`C:\Users\<用户名>\Downloads`（C 盘下载文件夹）
+- 点击 **浏览...** 选择目录后会自动记住；若下次打开或下载时该路径不存在，会自动弹窗提示重新选择。
 
-### 命令行启动
+### 方式二：从源码运行
+- 环境要求：Python 3.9+（自带 `tkinter`）与 `requests`（`pip install -r requirements.txt`）
+- Windows 一键启动：直接双击项目根目录的 **`start.bat`**。
+- 命令行启动：
 ```bash
 pip install -r requirements.txt
 python app.py

@@ -23,14 +23,16 @@ A lightweight, zero-bloat desktop GUI tool for downloading **any Hugging Face mo
 
 ## Quick Start
 
-### Requirements
-- Python 3.9+ (with built-in `tkinter`)
-- `requests` (`pip install -r requirements.txt`)
+### Option 1: Standalone Windows EXE (No Python Required)
+Download **`HF-Model-Downloader-v1.0.0-win64.exe`** from the [Releases](https://github.com/Satleixn/hf-model-downloader/releases) page and double-click to launch.
 
-### Windows (One-Click)
-Double-click **`start.bat`** in the repository root. It automatically checks Python and installs `requests` if needed, then launches the GUI.
+- Default save directory: `C:\Users\<User>\Downloads`
+- Your chosen folder via **Browse...** is remembered automatically; if a remembered folder no longer exists, the app will prompt you to select a new one.
 
-### Command Line
+### Option 2: Run from Source
+- Requirements: Python 3.9+ (with built-in `tkinter`) and `requests` (`pip install -r requirements.txt`)
+- Windows one-click: Double-click **`start.bat`** in the repository root.
+- Command line:
 ```bash
 pip install -r requirements.txt
 python app.py

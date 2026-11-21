@@ -9,16 +9,11 @@ from datetime import datetime
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import List, Optional, Tuple
 
+from .config import get_default_downloads_dir, load_saved_dir, save_selected_dir
 from .downloader import DownloadEngine, FileTask, format_bytes, format_duration, scan_local_files
 from .hf_parser import DEFAULT_ENDPOINT, ParsedRepo, fetch_repo_files, parse_hf_input
 from .i18n import LABEL_TO_LANG, LANG_OPTIONS, LANG_TO_LABEL, format_task_status, tr
 from .verifier import VerifyEngine, VerifySummary
-
-
-def default_base_dir() -> str:
-    if os.path.isdir(r"H:\Models"):
-        return r"H:\Models"
-    return os.path.join(os.path.expanduser("~"), "Models")
 
 
 class HFDownloaderGUI:
@@ -29,15 +24,23 @@ class HFDownloaderGUI:
         initial_dir: Optional[str] = None,
         autostart: bool = False,
         lang: str = "zh",
+        config_path: Optional[str] = None,
     ) -> None:
         self.root = root
+        self.config_path = config_path
         self.lang = lang if lang in LANG_TO_LABEL else "zh"
         self.root.geometry("1120x790")
         self.root.minsize(940, 660)
 
+        saved_dir = load_saved_dir(self.config_path) if initial_dir is None else None
+        resolved_init_dir = initial_dir or saved_dir or get_default_downloads_dir()
+        self._startup_missing_dir = (
+            saved_dir if (saved_dir and not os.path.isdir(saved_dir)) else None
+        )
+
         self.lang_var = tk.StringVar(value=LANG_TO_LABEL[self.lang])
         self.url_var = tk.StringVar(value=initial_url)
-        self.save_dir_var = tk.StringVar(value=initial_dir or default_base_dir())
+        self.save_dir_var = tk.StringVar(value=resolved_init_dir)
         self.auto_subdir_var = tk.BooleanVar(value=True)
         self.endpoint_var = tk.StringVar(value=DEFAULT_ENDPOINT)
         self.token_var = tk.StringVar(value=os.environ.get("HF_TOKEN", ""))
@@ -65,6 +68,9 @@ class HFDownloaderGUI:
 
         self._refresh_disk_info()
         self._schedule_ui_update()
+
+        if self._startup_missing_dir:
+            self.root.after(150, self._check_saved_dir_on_startup)
 
         if autostart and initial_url.strip():
             self.root.after(400, self.start_or_resume)
@@ -329,15 +335,45 @@ class HFDownloaderGUI:
             self.workers_var.set(4)
             return 4
 
+    def _check_saved_dir_on_startup(self) -> None:
+        missing = self._startup_missing_dir
+        self._startup_missing_dir = None
+        if missing and not os.path.isdir(missing):
+            messagebox.showwarning(
+                self._t("dlg_dir_missing_title"),
+                self._t("dlg_dir_missing_msg", path=missing),
+            )
+            self._browse_dir()
+
+    def _ensure_base_dir_exists(self) -> bool:
+        base_dir = self.save_dir_var.get().strip()
+        if base_dir and os.path.isdir(base_dir):
+            return True
+        messagebox.showwarning(
+            self._t("dlg_dir_missing_title"),
+            self._t("dlg_dir_missing_msg", path=base_dir or "(empty)"),
+        )
+        self._browse_dir()
+        new_dir = self.save_dir_var.get().strip()
+        return bool(new_dir and os.path.isdir(new_dir))
+
     def _browse_dir(self) -> None:
-        chosen = filedialog.askdirectory(initialdir=self.save_dir_var.get() or os.path.expanduser("~"))
+        current = self.save_dir_var.get().strip()
+        init_dir = current if (current and os.path.isdir(current)) else get_default_downloads_dir()
+        if not os.path.isdir(init_dir):
+            init_dir = os.path.expanduser("~")
+        chosen = filedialog.askdirectory(initialdir=init_dir)
         if chosen:
-            self.save_dir_var.set(os.path.normpath(chosen))
+            norm_path = os.path.normpath(chosen)
+            self.save_dir_var.set(norm_path)
+            save_selected_dir(norm_path, self.config_path)
             self._refresh_disk_info()
 
     def _open_folder(self) -> None:
+        if not self._ensure_base_dir_exists():
+            return
         path = self.active_save_dir
-        if not path:
+        if not path or not os.path.isdir(path):
             try:
                 _, path = self._resolve_target()
             except Exception:
@@ -499,6 +535,9 @@ class HFDownloaderGUI:
         if self.dl_engine.is_running or self.verify_engine.is_running or self.is_fetching:
             return
 
+        if not self._ensure_base_dir_exists():
+            return
+
         try:
             parsed, target_dir = self._resolve_target()
         except ValueError as exc:
@@ -567,6 +606,9 @@ class HFDownloaderGUI:
             return
 
         if self.dl_engine.is_running or self.is_fetching:
+            return
+
+        if not self._ensure_base_dir_exists():
             return
 
         try:
