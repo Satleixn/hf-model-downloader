@@ -6,11 +6,17 @@
 
 [English](README.md) | [中文说明](README_CN.md)
 
-A lightweight, zero-bloat desktop GUI tool for downloading **any Hugging Face model repository** with true HTTP Range pause/resume, one-click retry for failed files, official SHA-256 / Git Blob SHA-1 integrity verification with a live progress bar, and instant Chinese/English UI switching.
+A lightweight, zero-bloat desktop GUI tool for downloading **any Hugging Face model repository** with automatic multi-quantization detection, per-file checkbox selection, true HTTP Range pause/resume, one-click retry for failed files, official SHA-256 / Git Blob SHA-1 verification with a live progress bar, and instant Chinese/English UI switching.
 
 ## Features
 
 - **Any Hugging Face Model URL**: Paste a model homepage URL (e.g., `https://huggingface.co/owner/model`), a branch URL (`/tree/<revision>`), a mirror URL (`https://hf-mirror.com/...`), or a plain `owner/model` repo ID.
+- **Auto Multi-Quantization & Branch Detection (`v1.1.0`)**:
+  - Automatically detects multiple quantization variants in both **subfolder-grouped GGUF repos** (e.g., `unsloth/GLM-5.3-GGUF` with `UD-Q4_K_XL/`, `Q8_0/`, `BF16/`) and **flat/sharded GGUF repos** (e.g., `Qwen2.5-*-GGUF`), displaying exact file counts and total size per quantization.
+  - Detects multiple Git **branches** via `/api/models/{repo}/refs` for instant switching.
+  - Automatically keeps root config files (`config.json`, `tokenizer*`, `README.md`, etc.) and separates multimodal vision projectors (`mmproj-*.gguf`) with a dedicated toggle.
+  - **Per-file Checkbox Selection**: Click any file's checkbox (`☑`/`☐`) or press `Space` to customize selection freely. Download, Retry Failed, SHA Verification, progress bars, and disk-space checks strictly operate on selected files only.
+  - **Accidental Multi-TB Download Guard**: Alerts you to pick a quantization version if you click Start directly on a multi-quant repo.
 - **Live Bilingual UI (`中文` / `English`)**: Built-in top-right language switcher dropdown (defaults to Chinese; switches the entire interface live without restarting).
 - **Smart Save Directory**: Defaults to your OS system **Downloads** folder on first launch (via Windows `SHGetKnownFolderPath`). Remembers the folder chosen via **Browse...**, and automatically resets to your system Downloads folder with a clear alert if a previously saved directory disappears.
 - **True Pause / Resume / Stop**: Uses chunked HTTP `Range` streaming with `.part` temporary files. Pausing or closing the app preserves downloaded bytes and resumes cleanly from the exact offset.
@@ -24,9 +30,9 @@ A lightweight, zero-bloat desktop GUI tool for downloading **any Hugging Face mo
 ## Quick Start
 
 ### Option 1: Standalone Windows Builds (No Python Required)
-Go to the [Releases](https://github.com/Satleixn/hf-model-downloader/releases) page (`v1.0.2`):
-- **Portable ZIP (Recommended)**: Download **`HF-Model-Downloader-v1.0.2-win64-portable.zip`**, extract, and run `HF-Model-Downloader.exe`. Runs directly without extracting temporary directories (faster startup and immune to `Could not create temporary directory!` errors).
-- **Single-File EXE**: Download **`HF-Model-Downloader-v1.0.2-win64.exe`** and double-click to launch.
+Go to the [Releases](https://github.com/Satleixn/hf-model-downloader/releases) page (`v1.1.0`):
+- **Portable ZIP (Recommended)**: Download **`HF-Model-Downloader-v1.1.0-win64-portable.zip`**, extract, and run `HF-Model-Downloader.exe`. Runs directly without extracting temporary directories (faster startup and immune to `Could not create temporary directory!` errors).
+- **Single-File EXE**: Download **`HF-Model-Downloader-v1.1.0-win64.exe`** and double-click to launch.
 
 Both builds are compiled **without UPX** (`upx=False`), include Windows PE version metadata, a custom icon, and published SHA-256 checksums. You can also rebuild them locally via `python packaging/build_exe.py`.
 
@@ -52,7 +58,7 @@ python app.py --url "https://huggingface.co/owner/model" --dir "D:\Models" --lan
   1. Click **More info → Run anyway** (or right-click the downloaded `.zip`/`.exe` → **Properties** → check **Unblock** before running/extracting).
   2. Or run from source via `git clone` + `start.bat` (files cloned by Git never trigger SmartScreen).
 - **Seeing `Could not create temporary directory!` on the single-file `.exe`?**
-  Use **`HF-Model-Downloader-v1.0.2-win64-portable.zip`** instead—it does not extract to `%TEMP%` at runtime.
+  Make sure the folder containing the `.exe` does not have Windows `Low Mandatory Level` integrity inherited from a sandbox, or use **`HF-Model-Downloader-v1.1.0-win64-portable.zip`** instead.
 
 ## Project Structure
 
@@ -68,7 +74,8 @@ hf-model-downloader/
 │   └── version_info.txt# Windows PE version metadata
 ├── src/
 │   ├── config.py       # OS default Downloads resolution & path persistence
-│   ├── hf_parser.py    # Hugging Face URL/ID parser & API metadata client
+│   ├── hf_parser.py    # Hugging Face URL/ID parser, branches & API metadata client
+│   ├── quant_detector.py # Automatic multi-quantization & mmproj detector
 │   ├── downloader.py   # Multi-threaded resumable download engine + retry failed
 │   ├── verifier.py     # Multi-threaded official SHA-256 / SHA-1 verifier
 │   ├── i18n.py         # Chinese / English live UI translations

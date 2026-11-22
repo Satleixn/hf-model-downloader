@@ -7,13 +7,24 @@ import time
 import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, messagebox, scrolledtext, ttk
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .config import get_default_downloads_dir, load_saved_dir, save_selected_dir
 from .downloader import DownloadEngine, FileTask, format_bytes, format_duration, scan_local_files
-from .hf_parser import DEFAULT_ENDPOINT, ParsedRepo, fetch_repo_files, parse_hf_input
+from .hf_parser import (
+    DEFAULT_ENDPOINT,
+    ParsedRepo,
+    fetch_repo_branches,
+    fetch_repo_files,
+    parse_hf_input,
+)
 from .i18n import LABEL_TO_LANG, LANG_OPTIONS, LANG_TO_LABEL, format_task_status, tr
+from .quant_detector import DetectionResult, QuantOption, detect_quantizations
 from .verifier import VerifyEngine, VerifySummary
+
+
+CHECKED_MARK = "☑"
+UNCHECKED_MARK = "☐"
 
 
 class HFDownloaderGUI:
@@ -29,8 +40,8 @@ class HFDownloaderGUI:
         self.root = root
         self.config_path = config_path
         self.lang = lang if lang in LANG_TO_LABEL else "zh"
-        self.root.geometry("1120x790")
-        self.root.minsize(940, 660)
+        self.root.geometry("1160x840")
+        self.root.minsize(960, 700)
 
         saved_dir = load_saved_dir(self.config_path) if initial_dir is None else None
         resolved_init_dir = initial_dir or saved_dir or get_default_downloads_dir()
@@ -45,6 +56,17 @@ class HFDownloaderGUI:
         self.endpoint_var = tk.StringVar(value=DEFAULT_ENDPOINT)
         self.token_var = tk.StringVar(value=os.environ.get("HF_TOKEN", ""))
         self.workers_var = tk.IntVar(value=4)
+
+        # Branch & Quantization selection state
+        self.branch_var = tk.StringVar(value="main")
+        self.quant_var = tk.StringVar(value="")
+        self.include_mmproj_var = tk.BooleanVar(value=True)
+        self.selected_summary_var = tk.StringVar(value="")
+        self.available_branches: List[str] = ["main"]
+        self.detection = DetectionResult()
+        self.quant_choice_keys: List[str] = []  # parallel to quant_combo values ("all", "dir:...", "tag:...", "custom")
+        self.quant_option_map: Dict[str, QuantOption] = {}
+        self.current_quant_key: str = "all"
 
         self.state_lock = threading.Lock()
         self.tasks: List[FileTask] = []
@@ -105,14 +127,19 @@ class HFDownloaderGUI:
 
         # --- Configuration Frame ---
         self.cfg_frame = ttk.LabelFrame(main, padding=8)
-        self.cfg_frame.pack(fill=tk.X, pady=(0, 8))
+        self.cfg_frame.pack(fill=tk.X, pady=(0, 6))
         self.cfg_frame.columnconfigure(1, weight=3)
         self.cfg_frame.columnconfigure(3, weight=1)
 
         self.url_label_widget = ttk.Label(self.cfg_frame)
         self.url_label_widget.grid(row=0, column=0, sticky=tk.W, padx=(0, 6), pady=3)
-        self.url_entry = ttk.Entry(self.cfg_frame, textvariable=self.url_var)
-        self.url_entry.grid(row=0, column=1, sticky=tk.EW, padx=(0, 12), pady=3)
+        url_frame = ttk.Frame(self.cfg_frame)
+        url_frame.grid(row=0, column=1, sticky=tk.EW, padx=(0, 12), pady=3)
+        url_frame.columnconfigure(0, weight=1)
+        self.url_entry = ttk.Entry(url_frame, textvariable=self.url_var)
+        self.url_entry.grid(row=0, column=0, sticky=tk.EW)
+        self.parse_btn = ttk.Button(url_frame, width=12, command=self.inspect_repo)
+        self.parse_btn.grid(row=0, column=1, padx=(6, 0))
 
         self.endpoint_label_widget = ttk.Label(self.cfg_frame)
         self.endpoint_label_widget.grid(row=0, column=2, sticky=tk.W, padx=(0, 6), pady=3)
@@ -146,9 +173,60 @@ class HFDownloaderGUI:
         self.token_entry = ttk.Entry(opt_frame, textvariable=self.token_var, show="*")
         self.token_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        # --- Branch & Quantization Selector Frame ---
+        self.sel_frame = ttk.LabelFrame(main, padding=6)
+        self.sel_frame.pack(fill=tk.X, pady=(0, 6))
+
+        self.branch_label_widget = ttk.Label(self.sel_frame)
+        self.branch_label_widget.pack(side=tk.LEFT, padx=(0, 6))
+        self.branch_combo = ttk.Combobox(
+            self.sel_frame,
+            textvariable=self.branch_var,
+            values=["main"],
+            state="disabled",
+            width=14,
+        )
+        self.branch_combo.pack(side=tk.LEFT, padx=(0, 12))
+        self.branch_combo.bind("<<ComboboxSelected>>", self._on_branch_change)
+
+        self.quant_label_widget = ttk.Label(self.sel_frame)
+        self.quant_label_widget.pack(side=tk.LEFT, padx=(0, 6))
+        self.quant_combo = ttk.Combobox(
+            self.sel_frame,
+            textvariable=self.quant_var,
+            values=[],
+            state="disabled",
+            width=36,
+        )
+        self.quant_combo.pack(side=tk.LEFT, padx=(0, 10))
+        self.quant_combo.bind("<<ComboboxSelected>>", self._on_quant_change)
+
+        self.mmproj_chk = ttk.Checkbutton(
+            self.sel_frame,
+            variable=self.include_mmproj_var,
+            command=self._on_mmproj_toggle,
+            state=tk.DISABLED,
+        )
+        self.mmproj_chk.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.select_all_btn = ttk.Button(
+            self.sel_frame, width=8, command=self.select_all_files, state=tk.DISABLED
+        )
+        self.select_all_btn.pack(side=tk.LEFT, padx=(0, 4))
+
+        self.deselect_all_btn = ttk.Button(
+            self.sel_frame, width=8, command=self.deselect_all_files, state=tk.DISABLED
+        )
+        self.deselect_all_btn.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.selected_summary_label = ttk.Label(
+            self.sel_frame, textvariable=self.selected_summary_var, foreground="#1A56DB"
+        )
+        self.selected_summary_label.pack(side=tk.RIGHT)
+
         # --- Action Controls ---
         ctrl = ttk.Frame(main)
-        ctrl.pack(fill=tk.X, pady=(0, 8))
+        ctrl.pack(fill=tk.X, pady=(0, 6))
 
         self.start_btn = ttk.Button(ctrl, width=15, command=self.start_or_resume)
         self.start_btn.pack(side=tk.LEFT, padx=(0, 6))
@@ -185,7 +263,7 @@ class HFDownloaderGUI:
 
         # --- SHA Verification Progress ---
         self.ver_prog_frame = ttk.LabelFrame(main, padding=8)
-        self.ver_prog_frame.pack(fill=tk.X, pady=(0, 8))
+        self.ver_prog_frame.pack(fill=tk.X, pady=(0, 6))
 
         self.verify_bar = ttk.Progressbar(self.ver_prog_frame, mode="determinate", maximum=100.0)
         self.verify_bar.pack(fill=tk.X, pady=(0, 4))
@@ -202,14 +280,18 @@ class HFDownloaderGUI:
         self.list_frame = ttk.LabelFrame(paned, padding=6)
         paned.add(self.list_frame, weight=3)
 
-        columns = ("file", "size", "downloaded", "progress", "speed", "status")
+        columns = ("sel", "file", "size", "downloaded", "progress", "speed", "status")
         self.tree = ttk.Treeview(self.list_frame, columns=columns, show="headings", selectmode="browse")
-        self.tree.column("file", width=380, anchor=tk.W)
+        self.tree.column("sel", width=42, anchor=tk.CENTER, stretch=False)
+        self.tree.column("file", width=390, anchor=tk.W)
         self.tree.column("size", width=105, anchor=tk.E)
         self.tree.column("downloaded", width=130, anchor=tk.E)
-        self.tree.column("progress", width=80, anchor=tk.E)
+        self.tree.column("progress", width=78, anchor=tk.E)
         self.tree.column("speed", width=105, anchor=tk.E)
-        self.tree.column("status", width=180, anchor=tk.W)
+        self.tree.column("status", width=175, anchor=tk.W)
+
+        self.tree.bind("<Button-1>", self._on_tree_click)
+        self.tree.bind("<space>", self._on_tree_space)
 
         vsb = ttk.Scrollbar(self.list_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
@@ -220,10 +302,11 @@ class HFDownloaderGUI:
         paned.add(self.log_frame, weight=1)
 
         self.log_text = scrolledtext.ScrolledText(
-            self.log_frame, height=7, state=tk.DISABLED, font=("Consolas", 9)
+            self.log_frame, height=6, state=tk.DISABLED, font=("Consolas", 9)
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
+    # --- Language Handling ---
     def _on_language_change(self, _event=None) -> None:
         selected_label = self.lang_var.get()
         new_lang = LABEL_TO_LANG.get(selected_label, "zh")
@@ -242,12 +325,20 @@ class HFDownloaderGUI:
         self.lang_label_widget.config(text=self._t("lang_label"))
         self.cfg_frame.config(text=self._t("cfg_frame"))
         self.url_label_widget.config(text=self._t("url_label"))
+        self.parse_btn.config(text=self._t("parse_btn"))
         self.endpoint_label_widget.config(text=self._t("endpoint_label"))
         self.save_dir_label_widget.config(text=self._t("save_dir_label"))
         self.browse_btn.config(text=self._t("browse_btn"))
         self.auto_subdir_chk.config(text=self._t("auto_subdir"))
         self.workers_label_widget.config(text=self._t("workers_label"))
         self.token_label_widget.config(text=self._t("token_label"))
+
+        self.sel_frame.config(text=self._t("sel_frame"))
+        self.branch_label_widget.config(text=self._t("branch_label"))
+        self.quant_label_widget.config(text=self._t("quant_label"))
+        self.mmproj_chk.config(text=self._t("include_mmproj"))
+        self.select_all_btn.config(text=self._t("select_all_btn"))
+        self.deselect_all_btn.config(text=self._t("deselect_all_btn"))
 
         self.start_btn.config(text=self._t("start_btn"))
         self.pause_btn.config(text=self._t("pause_btn"))
@@ -259,6 +350,7 @@ class HFDownloaderGUI:
         self.list_frame.config(text=self._t("list_frame"))
         self.log_frame.config(text=self._t("log_frame"))
 
+        self.tree.heading("sel", text=self._t("col_sel"))
         self.tree.heading("file", text=self._t("col_file"))
         self.tree.heading("size", text=self._t("col_size"))
         self.tree.heading("downloaded", text=self._t("col_done"))
@@ -266,6 +358,8 @@ class HFDownloaderGUI:
         self.tree.heading("speed", text=self._t("col_speed"))
         self.tree.heading("status", text=self._t("col_status"))
 
+        self._refresh_quant_combobox()
+        self._refresh_selected_summary()
         self._refresh_disk_info()
         self._sync_button_states()
         self._render_empty_stats_if_needed()
@@ -313,8 +407,11 @@ class HFDownloaderGUI:
         ts = datetime.now().strftime("%H:%M:%S")
         self.log_queue.put(f"[{ts}] {msg}\n")
 
-    def _resolve_target(self) -> Tuple[ParsedRepo, str]:
+    # --- Save Directory Management ---
+    def _resolve_target(self, override_revision: Optional[str] = None) -> Tuple[ParsedRepo, str]:
         parsed = parse_hf_input(self.url_var.get(), default_endpoint=self.endpoint_var.get())
+        if override_revision:
+            parsed = ParsedRepo(endpoint=parsed.endpoint, repo_id=parsed.repo_id, revision=override_revision)
         base_dir = self.save_dir_var.get().strip()
         if not base_dir:
             raise ValueError(self._t("err_no_save_dir"))
@@ -405,9 +502,177 @@ class HFDownloaderGUI:
         except Exception:
             self.disk_label.config(text=self._t("disk_unknown"))
 
+    # --- Quantization & File Selection Controls ---
+    def _refresh_quant_combobox(self) -> None:
+        with self.state_lock:
+            tasks_snapshot = list(self.tasks)
+
+        if not tasks_snapshot:
+            self.quant_choice_keys = []
+            self.quant_option_map = {}
+            self.quant_combo.config(values=[])
+            self.quant_var.set("")
+            return
+
+        total_count = len(tasks_snapshot)
+        total_size = sum(t.total_size for t in tasks_snapshot)
+
+        labels: List[str] = [
+            self._t("quant_all", count=total_count, size=format_bytes(total_size))
+        ]
+        keys: List[str] = ["all"]
+        opt_map: Dict[str, QuantOption] = {}
+
+        for opt in self.detection.options:
+            labels.append(
+                self._t("quant_option", label=opt.label, count=opt.file_count, size=format_bytes(opt.total_size))
+            )
+            keys.append(opt.key)
+            opt_map[opt.key] = opt
+
+        if self.current_quant_key == "custom":
+            sel_tasks = [t for t in tasks_snapshot if t.selected]
+            labels.append(
+                self._t(
+                    "quant_custom",
+                    count=len(sel_tasks),
+                    size=format_bytes(sum(t.total_size for t in sel_tasks)),
+                )
+            )
+            keys.append("custom")
+
+        self.quant_choice_keys = keys
+        self.quant_option_map = opt_map
+        self.quant_combo.config(values=labels)
+
+        if self.current_quant_key in keys:
+            idx = keys.index(self.current_quant_key)
+            self.quant_var.set(labels[idx])
+        else:
+            self.current_quant_key = "all"
+            self.quant_var.set(labels[0])
+
+    def _refresh_selected_summary(self) -> None:
+        with self.state_lock:
+            snapshot = list(self.tasks)
+        if not snapshot:
+            self.selected_summary_var.set("")
+            return
+        sel = [t for t in snapshot if t.selected]
+        sel_bytes = sum(t.total_size for t in sel)
+        self.selected_summary_var.set(
+            self._t("selected_summary", selected=len(sel), total=len(snapshot), size=format_bytes(sel_bytes))
+        )
+
+    def apply_quant_selection(self, quant_key: str) -> None:
+        """Select files belonging to `quant_key` (plus common configs and optional mmproj)."""
+        with self.state_lock:
+            if quant_key == "all":
+                for t in self.tasks:
+                    t.selected = True
+            elif quant_key in self.quant_option_map:
+                opt = self.quant_option_map[quant_key]
+                keep = set(opt.filenames) | set(self.detection.common_files)
+                if self.include_mmproj_var.get():
+                    keep |= set(self.detection.mmproj_files)
+                for t in self.tasks:
+                    t.selected = t.rfilename in keep
+
+        self.current_quant_key = quant_key
+        self._refresh_quant_combobox()
+        self._refresh_selected_summary()
+        self._sync_button_states()
+        self._update_ui_once()
+
+    def _on_quant_change(self, _event=None) -> None:
+        if self.dl_engine.is_running or self.verify_engine.is_running or self.is_fetching:
+            return
+        idx = self.quant_combo.current()
+        if 0 <= idx < len(self.quant_choice_keys):
+            key = self.quant_choice_keys[idx]
+            if key != "custom":
+                self.apply_quant_selection(key)
+
+    def _on_mmproj_toggle(self) -> None:
+        if self.dl_engine.is_running or self.verify_engine.is_running or self.is_fetching:
+            return
+        if self.current_quant_key in self.quant_option_map:
+            self.apply_quant_selection(self.current_quant_key)
+        else:
+            mmproj_set = set(self.detection.mmproj_files)
+            include = self.include_mmproj_var.get()
+            with self.state_lock:
+                for t in self.tasks:
+                    if t.rfilename in mmproj_set:
+                        t.selected = include
+            self._refresh_selected_summary()
+            self._update_ui_once()
+
+    def _on_branch_change(self, _event=None) -> None:
+        if self.dl_engine.is_running or self.verify_engine.is_running or self.is_fetching:
+            return
+        new_branch = self.branch_var.get().strip()
+        if not new_branch:
+            return
+        if self.active_repo and self.active_repo.revision == new_branch:
+            return
+        try:
+            parsed, target_dir = self._resolve_target(override_revision=new_branch)
+        except ValueError as exc:
+            messagebox.showwarning(self._t("dlg_invalid_input_title"), str(exc))
+            return
+        self._load_repo_async(parsed, target_dir, on_loaded=lambda: None)
+
+    def select_all_files(self) -> None:
+        if self.dl_engine.is_running or self.verify_engine.is_running or self.is_fetching:
+            return
+        self.apply_quant_selection("all")
+
+    def deselect_all_files(self) -> None:
+        if self.dl_engine.is_running or self.verify_engine.is_running or self.is_fetching:
+            return
+        with self.state_lock:
+            for t in self.tasks:
+                t.selected = False
+        self.current_quant_key = "custom"
+        self._refresh_quant_combobox()
+        self._refresh_selected_summary()
+        self._sync_button_states()
+        self._update_ui_once()
+
+    def _toggle_task_selection(self, item_id: str) -> None:
+        if self.dl_engine.is_running or self.verify_engine.is_running or self.is_fetching:
+            return
+        with self.state_lock:
+            for t in self.tasks:
+                if t.rfilename == item_id:
+                    t.selected = not t.selected
+                    break
+        self.current_quant_key = "custom"
+        self._refresh_quant_combobox()
+        self._refresh_selected_summary()
+        self._sync_button_states()
+        self._update_ui_once()
+
+    def _on_tree_click(self, event) -> None:
+        region = self.tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        col = self.tree.identify_column(event.x)
+        row_id = self.tree.identify_row(event.y)
+        if row_id and col == "#1":
+            self._toggle_task_selection(row_id)
+
+    def _on_tree_space(self, _event=None) -> None:
+        sel = self.tree.selection()
+        if sel:
+            self._toggle_task_selection(sel[0])
+
+    # --- UI State Sync ---
     def _set_inputs_enabled(self, enabled: bool) -> None:
         state = tk.NORMAL if enabled else tk.DISABLED
         self.url_entry.config(state=state)
+        self.parse_btn.config(state=state)
         self.save_entry.config(state=state)
         self.browse_btn.config(state=state)
         self.auto_subdir_chk.config(state=state)
@@ -415,13 +680,30 @@ class HFDownloaderGUI:
         self.workers_spin.config(state=state)
         self.token_entry.config(state=state)
 
+        with self.state_lock:
+            has_tasks = bool(self.tasks)
+        has_mmproj = bool(self.detection.mmproj_files)
+
+        if enabled and has_tasks:
+            self.branch_combo.config(state="readonly" if len(self.available_branches) > 1 else "disabled")
+            self.quant_combo.config(state="readonly")
+            self.mmproj_chk.config(state=tk.NORMAL if has_mmproj else tk.DISABLED)
+            self.select_all_btn.config(state=tk.NORMAL)
+            self.deselect_all_btn.config(state=tk.NORMAL)
+        else:
+            self.branch_combo.config(state="disabled")
+            self.quant_combo.config(state="disabled")
+            self.mmproj_chk.config(state=tk.DISABLED)
+            self.select_all_btn.config(state=tk.DISABLED)
+            self.deselect_all_btn.config(state=tk.DISABLED)
+
     def _sync_button_states(self) -> None:
         busy_dl = self.dl_engine.is_running
         busy_ver = self.verify_engine.is_running
         busy = busy_dl or busy_ver or self.is_fetching
 
         with self.state_lock:
-            failed_count = sum(1 for t in self.tasks if t.needs_retry)
+            failed_count = sum(1 for t in self.tasks if t.selected and t.needs_retry)
 
         self._set_inputs_enabled(not busy)
 
@@ -457,6 +739,14 @@ class HFDownloaderGUI:
             )
             self.verify_btn.config(text=self._t("verify_btn"), state=tk.NORMAL)
 
+    # --- Repo Loading & Actions ---
+    def _is_already_loaded(self, parsed: ParsedRepo, target_dir: str) -> bool:
+        return (
+            bool(self.tasks)
+            and self.active_repo == parsed
+            and os.path.normpath(self.active_save_dir) == os.path.normpath(target_dir)
+        )
+
     def _load_repo_async(self, parsed: ParsedRepo, target_dir: str, on_loaded) -> None:
         self.is_fetching = True
         self.last_dl_state_key = "state_loading"
@@ -466,8 +756,14 @@ class HFDownloaderGUI:
         def _worker() -> None:
             try:
                 self._log(
-                    f"正在获取模型列表 / Fetching repo: {parsed.repo_id} "
+                    f"正在解析模型仓库 / Inspecting repo: {parsed.repo_id} "
                     f"(rev={parsed.revision}, endpoint={parsed.endpoint}) ..."
+                )
+                branches = fetch_repo_branches(
+                    endpoint=parsed.endpoint,
+                    repo_id=parsed.repo_id,
+                    token=token,
+                    fallback_revision=parsed.revision,
                 )
                 remote_files = fetch_repo_files(
                     endpoint=parsed.endpoint,
@@ -478,6 +774,7 @@ class HFDownloaderGUI:
                 if not remote_files:
                     raise ValueError(self._t("err_empty_repo"))
 
+                detection = detect_quantizations(remote_files)
                 os.makedirs(target_dir, exist_ok=True)
                 tasks = scan_local_files(remote_files, target_dir)
 
@@ -485,29 +782,31 @@ class HFDownloaderGUI:
                     self.tasks = tasks
                     self.active_repo = parsed
                     self.active_save_dir = target_dir
+                    self.available_branches = branches
+                    self.detection = detection
+                    self.current_quant_key = "all"
 
                 total_bytes = sum(t.total_size for t in tasks)
                 already_bytes = sum(t.downloaded for t in tasks)
-                pending_count = sum(1 for t in tasks if t.state != "completed")
-                self._log(
-                    f"加载成功 / Loaded: {len(tasks)} files, total {format_bytes(total_bytes)}, "
-                    f"local {format_bytes(already_bytes)}, pending {pending_count}. Dir: {target_dir}"
+                quant_info = (
+                    f"，检测到 {len(detection.options)} 个量化版本"
+                    if detection.is_multi_quant
+                    else ""
                 )
-
-                try:
-                    usage = shutil.disk_usage(target_dir)
-                    needed = max(0, total_bytes - already_bytes)
-                    if usage.free < needed:
-                        self._log(
-                            f"警告 / Warning: free disk ({format_bytes(usage.free)}) < needed ({format_bytes(needed)})!"
-                        )
-                except Exception:
-                    pass
+                self._log(
+                    f"解析完成 / Loaded: {len(tasks)} files ({format_bytes(total_bytes)}){quant_info}, "
+                    f"local {format_bytes(already_bytes)}. Dir: {target_dir}"
+                )
 
                 def _finish_load() -> None:
                     self.is_fetching = False
+                    self.last_dl_state_key = "state_ready"
                     self.endpoint_var.set(parsed.endpoint)
+                    self.branch_combo.config(values=self.available_branches)
+                    self.branch_var.set(parsed.revision)
                     self._populate_treeview()
+                    self._refresh_quant_combobox()
+                    self._refresh_selected_summary()
                     self._refresh_disk_info()
                     self._sync_button_states()
                     on_loaded()
@@ -526,6 +825,55 @@ class HFDownloaderGUI:
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def inspect_repo(self) -> None:
+        if self.dl_engine.is_running or self.verify_engine.is_running or self.is_fetching:
+            return
+        if not self._ensure_base_dir_exists():
+            return
+        try:
+            parsed, target_dir = self._resolve_target()
+        except ValueError as exc:
+            messagebox.showwarning(self._t("dlg_invalid_input_title"), str(exc))
+            return
+        self._load_repo_async(parsed, target_dir, on_loaded=lambda: None)
+
+    def _warn_disk_space_if_needed(self, target_dir: str) -> None:
+        with self.state_lock:
+            sel_tasks = [t for t in self.tasks if t.selected]
+        needed = sum(max(0, t.total_size - t.downloaded) for t in sel_tasks)
+        try:
+            usage = shutil.disk_usage(target_dir)
+            if usage.free < needed:
+                self._log(
+                    f"警告 / Warning: free disk ({format_bytes(usage.free)}) < needed ({format_bytes(needed)})!"
+                )
+        except Exception:
+            pass
+
+    def _launch_download_selected(self, parsed: ParsedRepo, target_dir: str) -> None:
+        with self.state_lock:
+            selected_count = sum(1 for t in self.tasks if t.selected)
+        if selected_count == 0:
+            messagebox.showwarning(self._t("dlg_no_selected_title"), self._t("dlg_no_selected_msg"))
+            return
+
+        self._warn_disk_space_if_needed(target_dir)
+        self.dl_speed_samples.clear()
+        self.last_dl_state_key = "state_downloading"
+        queued = self.dl_engine.start(
+            tasks=self.tasks,
+            endpoint=parsed.endpoint,
+            repo_id=parsed.repo_id,
+            revision=parsed.revision,
+            save_dir=target_dir,
+            workers=self._get_workers(),
+            token=self.token_var.get().strip(),
+            only_failed=False,
+        )
+        if queued == 0:
+            self._log("已选文件均已下载完成 / All selected files already downloaded.")
+        self._sync_button_states()
+
     def start_or_resume(self) -> None:
         if self.dl_engine.is_running and self.dl_engine.pause_event.is_set():
             self.dl_engine.resume()
@@ -540,30 +888,32 @@ class HFDownloaderGUI:
         if not self._ensure_base_dir_exists():
             return
 
+        override_rev = self.branch_var.get().strip() if self.active_repo else None
         try:
-            parsed, target_dir = self._resolve_target()
+            parsed, target_dir = self._resolve_target(override_revision=override_rev)
         except ValueError as exc:
             messagebox.showwarning(self._t("dlg_invalid_input_title"), str(exc))
             return
 
-        def _launch() -> None:
-            self.dl_speed_samples.clear()
-            self.last_dl_state_key = "state_downloading"
-            queued = self.dl_engine.start(
-                tasks=self.tasks,
-                endpoint=parsed.endpoint,
-                repo_id=parsed.repo_id,
-                revision=parsed.revision,
-                save_dir=target_dir,
-                workers=self._get_workers(),
-                token=self.token_var.get().strip(),
-                only_failed=False,
-            )
-            if queued == 0:
-                self._log("所有文件均已下载完成 / All files already downloaded.")
-            self._sync_button_states()
+        if self._is_already_loaded(parsed, target_dir):
+            self._launch_download_selected(parsed, target_dir)
+            return
 
-        self._load_repo_async(parsed, target_dir, _launch)
+        def _after_load() -> None:
+            if self.detection.is_multi_quant:
+                total_sz = format_bytes(sum(t.total_size for t in self.tasks))
+                messagebox.showinfo(
+                    self._t("dlg_multi_quant_title"),
+                    self._t(
+                        "dlg_multi_quant_msg",
+                        count=len(self.detection.options),
+                        total_size=total_sz,
+                    ),
+                )
+                return
+            self._launch_download_selected(parsed, target_dir)
+
+        self._load_repo_async(parsed, target_dir, _after_load)
 
     def pause_download(self) -> None:
         if not self.dl_engine.is_running or self.dl_engine.pause_event.is_set():
@@ -613,13 +963,19 @@ class HFDownloaderGUI:
         if not self._ensure_base_dir_exists():
             return
 
+        override_rev = self.branch_var.get().strip() if self.active_repo else None
         try:
-            parsed, target_dir = self._resolve_target()
+            parsed, target_dir = self._resolve_target(override_revision=override_rev)
         except ValueError as exc:
             messagebox.showwarning(self._t("dlg_invalid_input_title"), str(exc))
             return
 
         def _launch_verify() -> None:
+            with self.state_lock:
+                selected_count = sum(1 for t in self.tasks if t.selected)
+            if selected_count == 0:
+                messagebox.showwarning(self._t("dlg_no_selected_title"), self._t("dlg_no_selected_msg"))
+                return
             self.verify_speed_samples.clear()
             self.last_verify_state_key = "ver_running"
             self.last_verify_bad_count = 0
@@ -630,11 +986,7 @@ class HFDownloaderGUI:
             )
             self._sync_button_states()
 
-        if (
-            self.tasks
-            and self.active_repo == parsed
-            and os.path.normpath(self.active_save_dir) == os.path.normpath(target_dir)
-        ):
+        if self._is_already_loaded(parsed, target_dir):
             _launch_verify()
         else:
             self._load_repo_async(parsed, target_dir, _launch_verify)
@@ -682,6 +1034,7 @@ class HFDownloaderGUI:
                 tk.END,
                 iid=t.rfilename,
                 values=(
+                    CHECKED_MARK if t.selected else UNCHECKED_MARK,
                     t.rfilename,
                     format_bytes(t.total_size),
                     format_bytes(t.downloaded),
@@ -715,6 +1068,7 @@ class HFDownloaderGUI:
 
         total_bytes = 0
         downloaded_bytes = 0
+        selected_count = 0
         completed_files = 0
         failed_files = 0
         active_dl_speed = 0.0
@@ -727,6 +1081,7 @@ class HFDownloaderGUI:
 
         for t in snapshot:
             with t.lock:
+                t_sel = t.selected
                 t_size = t.total_size
                 t_dl = t.downloaded
                 t_pct = t.progress_pct
@@ -739,22 +1094,24 @@ class HFDownloaderGUI:
                 v_spd = t.verify_speed_bps
                 needs_retry = t.needs_retry
 
-            total_bytes += t_size
-            downloaded_bytes += t_dl
-            if t_state == "completed":
-                completed_files += 1
-            if needs_retry:
-                failed_files += 1
-            if t_state == "downloading":
-                active_dl_speed += t_spd
+            if t_sel:
+                selected_count += 1
+                total_bytes += t_size
+                downloaded_bytes += t_dl
+                if t_state == "completed":
+                    completed_files += 1
+                if needs_retry:
+                    failed_files += 1
+                if t_state == "downloading":
+                    active_dl_speed += t_spd
 
-            verified_bytes += v_bytes
-            if v_state == "passed":
-                verify_passed += 1
-            elif v_state in ("mismatch", "missing", "error"):
-                verify_bad += 1
-            if v_state == "verifying":
-                active_verify_speed += v_spd
+                verified_bytes += v_bytes
+                if v_state == "passed":
+                    verify_passed += 1
+                elif v_state in ("mismatch", "missing", "error"):
+                    verify_bad += 1
+                if v_state == "verifying":
+                    active_verify_speed += v_spd
 
             if self.tree.exists(t.rfilename):
                 if v_state == "verifying":
@@ -768,7 +1125,15 @@ class HFDownloaderGUI:
                 status_str = format_task_status(t_state, v_state, t_err, self.lang)
                 self.tree.item(
                     t.rfilename,
-                    values=(t.rfilename, format_bytes(t_size), col_done, col_pct, col_spd, status_str),
+                    values=(
+                        CHECKED_MARK if t_sel else UNCHECKED_MARK,
+                        t.rfilename,
+                        format_bytes(t_size),
+                        col_done,
+                        col_pct,
+                        col_spd,
+                        status_str,
+                    ),
                 )
 
         now = time.monotonic()
@@ -803,7 +1168,7 @@ class HFDownloaderGUI:
                 done=format_bytes(downloaded_bytes),
                 total=format_bytes(total_bytes),
                 completed=completed_files,
-                count=len(snapshot),
+                count=selected_count,
                 failed=failed_files,
                 speed=format_bytes(dl_speed),
                 eta=format_duration(dl_eta),
@@ -829,7 +1194,7 @@ class HFDownloaderGUI:
         ver_pct = (
             (verified_bytes / total_bytes * 100.0)
             if total_bytes > 0
-            else (100.0 if verify_passed == len(snapshot) and len(snapshot) > 0 else 0.0)
+            else (100.0 if verify_passed == selected_count and selected_count > 0 else 0.0)
         )
         ver_eta = (max(0, total_bytes - verified_bytes) / ver_speed) if ver_speed > 0 else float("inf")
         self.verify_bar["value"] = ver_pct
@@ -841,7 +1206,7 @@ class HFDownloaderGUI:
                 done=format_bytes(verified_bytes),
                 total=format_bytes(total_bytes),
                 passed=verify_passed,
-                count=len(snapshot),
+                count=selected_count,
                 bad=verify_bad,
                 speed=format_bytes(ver_speed),
                 eta=format_duration(ver_eta),

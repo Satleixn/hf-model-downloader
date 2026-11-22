@@ -128,3 +128,29 @@ def fetch_repo_files(
         )
 
     return files
+
+
+def fetch_repo_branches(
+    endpoint: str,
+    repo_id: str,
+    token: str = "",
+    timeout: int = 15,
+    fallback_revision: str = "main",
+) -> List[str]:
+    """Fetch available Git branches for a Hugging Face model repo via /refs API."""
+    base = endpoint.rstrip("/")
+    refs_url = f"{base}/api/models/{repo_id}/refs"
+    try:
+        resp = requests.get(refs_url, headers=build_headers(token), timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        branches = [
+            b["name"]
+            for b in data.get("branches", [])
+            if isinstance(b, dict) and isinstance(b.get("name"), str) and b["name"].strip()
+        ]
+        if fallback_revision and fallback_revision not in branches:
+            branches.insert(0, fallback_revision)
+        return branches or [fallback_revision or "main"]
+    except Exception:
+        return [fallback_revision or "main"]

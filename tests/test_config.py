@@ -1,3 +1,4 @@
+import gc
 import os
 import tempfile
 import tkinter as tk
@@ -49,6 +50,8 @@ class TestConfigAndPathPersistence(unittest.TestCase):
             self.assertEqual(gui.save_dir_var.get(), os.path.normpath(valid_dir))
             self.assertEqual(load_saved_dir(self.cfg_path), os.path.normpath(valid_dir))
         finally:
+            del gui
+            gc.collect()
             root.destroy()
 
         # 2. Saved path disappeared before startup -> warn and reset to system Downloads
@@ -73,6 +76,8 @@ class TestConfigAndPathPersistence(unittest.TestCase):
             self.assertEqual(gui2.save_dir_var.get(), default_dir)
             self.assertEqual(load_saved_dir(self.cfg_path), default_dir)
         finally:
+            del gui2
+            gc.collect()
             root2.destroy()
 
 

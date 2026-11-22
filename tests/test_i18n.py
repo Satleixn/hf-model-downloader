@@ -1,3 +1,4 @@
+import gc
 import string
 import tkinter as tk
 import unittest
@@ -51,13 +52,15 @@ class TestI18n(unittest.TestCase):
             self.assertEqual(gui.lang_var.get(), "English")
             self.assertEqual(gui.start_btn.cget("text"), tr("en", "start_btn"))
             self.assertEqual(gui.verify_btn.cget("text"), tr("en", "verify_btn"))
-            self.assertEqual(gui.tree.item("config.json", "values")[5], "Verified ✔")
+            self.assertEqual(gui.tree.item("config.json", "values")[6], "Verified ✔")
 
             # Switch back to Chinese
             gui.set_language("zh")
             self.assertEqual(gui.start_btn.cget("text"), tr("zh", "start_btn"))
-            self.assertEqual(gui.tree.item("config.json", "values")[5], "校验通过 ✔")
+            self.assertEqual(gui.tree.item("config.json", "values")[6], "校验通过 ✔")
         finally:
+            del gui
+            gc.collect()
             root.destroy()
 
 

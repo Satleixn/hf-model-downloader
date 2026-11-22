@@ -10,7 +10,7 @@ import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "1.0.2"
+VERSION = "1.1.0"
 EXE_NAME = f"HF-Model-Downloader-v{VERSION}-win64"
 PORTABLE_DIR_NAME = f"HF-Model-Downloader-v{VERSION}-win64-portable"
 ICON_PATH = ROOT / "assets" / "app.ico"

@@ -6,11 +6,17 @@
 
 [English](README.md) | [中文说明](README_CN.md)
 
-一款轻量、无冗余依赖的桌面端 GUI 工具，支持输入**任意 Hugging Face 模型主页链接**下载完整权重，内置中英文界面实时切换、真断点续传（暂停 / 继续 / 终止）、**一键重试失败**以及带可视化进度条的**官方 SHA 完整性校验**。
+一款轻量、无冗余依赖的桌面端 GUI 工具，支持输入**任意 Hugging Face 模型主页链接**，内置**多量化版本与分支自动识别**、文件复选框按需勾选、中英文界面实时切换、真断点续传（暂停 / 继续 / 终止）、**一键重试失败**以及带可视化进度条的**官方 SHA 完整性校验**。
 
 ## 核心功能
 
 - **支持任意模型主页链接**：直接粘贴 `https://huggingface.co/owner/model`、分支链接（`/tree/<branch>`）、镜像链接（`https://hf-mirror.com/...`）或 `owner/model` 仓库 ID 均可自动解析。
+- **多量化版本与分支自动识别（`v1.1.0` 新增）**：
+  - 自动识别**子目录分片型 GGUF 仓库**（如 `unsloth/GLM-5.3-GGUF` 下的 `UD-Q4_K_XL/`、`Q8_0/`、`BF16/`）以及**平铺单文件/多分片型仓库**（如 `Qwen2.5-*-GGUF`），在下拉菜单按体积从小到大展示各量化版本的文件数与总大小。
+  - 自动读取仓库全部 Git **分支**（`/api/models/{repo}/refs`），支持下拉切换分支。
+  - 选中任意量化版本时自动保留根目录公共配置文件，并对多模态视觉权重（`mmproj-*.gguf`）提供独立开关。
+  - **文件列表复选框自由勾选**：点击文件行首 `☑`/`☐` 或按空格键即可任意增减文件；下载、一键重试失败、官方 SHA 校验、总进度条和磁盘预警均严格只针对已选文件生效。
+  - **防误下保护**：直接点击开始下载多量化仓库时，会先自动解析并弹窗提醒选择目标量化版本，防止误下数 TB。
 - **中英文界面实时切换（默认中文）**：界面右上角提供语言下拉菜单（`中文` / `English`），无需重启即可即时切换全部界面文字。
 - **智能保存目录**：首次启动自动读取**系统默认“下载”文件夹**（支持已迁移的 Windows 下载目录）；点击 **浏览...** 选择的目录会自动记住，若上次保存的目录不存在了，会弹窗提示并自动重设为系统默认下载文件夹。
 - **真断点续传与控制**：基于 HTTP `Range` 分块流式写入 `.part` 临时文件，支持随时**暂停 / 继续 / 终止**，关闭重启软件也不会丢失已下载进度。
@@ -24,9 +30,9 @@
 ## 快速开始
 
 ### 方式一：直接下载 Windows 成品包（免装 Python）
-前往 [Releases](https://github.com/Satleixn/hf-model-downloader/releases) 页面（`v1.0.2`）：
-- **绿色便携版 ZIP（推荐）**：下载 **`HF-Model-Downloader-v1.0.2-win64-portable.zip`**，解压后直接运行 `HF-Model-Downloader.exe`。运行时无需向 `%TEMP%` 解压临时目录，启动更快，彻底避免 `Could not create temporary directory!` 报错。
-- **单文件 EXE**：下载 **`HF-Model-Downloader-v1.0.2-win64.exe`**，双击即可启动。
+前往 [Releases](https://github.com/Satleixn/hf-model-downloader/releases) 页面（`v1.1.0`）：
+- **绿色便携版 ZIP（推荐）**：下载 **`HF-Model-Downloader-v1.1.0-win64-portable.zip`**，解压后直接运行 `HF-Model-Downloader.exe`。运行时无需向 `%TEMP%` 解压临时目录，启动更快，彻底避免 `Could not create temporary directory!` 报错。
+- **单文件 EXE**：下载 **`HF-Model-Downloader-v1.1.0-win64.exe`**，双击即可启动。
 
 两个版本均**禁用 UPX 压缩**（最大程度降低杀毒软件误报），内置 Windows 版本元数据与自定义图标，并在 Release 页面附带官方 SHA-256 校验值；也可运行 `python packaging/build_exe.py` 本地自行构建。
 
@@ -52,7 +58,7 @@ python app.py --url "https://huggingface.co/owner/model" --dir "D:\Models" --lan
   1. 在提示窗点击 **更多信息 → 仍要运行**（或在运行/解压前，右键下载的 `.zip`/`.exe` → **属性** → 勾选底部的 **解除锁定**）。
   2. 或采用 `git clone` + 双击 `start.bat` 源码方式启动，完全不会触发 SmartScreen。
 - **如果单文件版出现 `Could not create temporary directory!`？**
-  请改用同版本的 **`HF-Model-Downloader-v1.0.2-win64-portable.zip`** 绿色便携版即可彻底解决。
+  请确认存放 `.exe` 的文件夹没有继承沙箱遗留的 Windows `Low Mandatory Level` 权限（可放到“下载”或桌面运行），或改用同版本的 **`HF-Model-Downloader-v1.1.0-win64-portable.zip`** 绿色便携版。
 
 ## 运行测试
 

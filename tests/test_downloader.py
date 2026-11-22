@@ -70,7 +70,7 @@ class TestDownloader(unittest.TestCase):
         }
         _RangeTestHandler.fail_once_paths = set()
 
-        self.httpd = socketserver.TCPServer(("127.0.0.1", 0), _RangeTestHandler)
+        self.httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _RangeTestHandler)
         self.port = self.httpd.server_address[1]
         self.server_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.server_thread.start()

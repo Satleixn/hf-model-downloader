@@ -43,6 +43,7 @@ class FileTask:
     expected_sha256: Optional[str] = None
     expected_blob_id: Optional[str] = None
     downloaded: int = 0
+    selected: bool = True
     state: str = "waiting"  # waiting, resumable, downloading, paused, completed, failed, stopped
     status_text: str = "等待中"
     speed_bps: float = 0.0
@@ -149,6 +150,8 @@ class DownloadEngine:
         pending: List[FileTask] = []
         for t in tasks:
             with t.lock:
+                if not t.selected:
+                    continue
                 if only_failed:
                     if not t.needs_retry:
                         continue
@@ -248,7 +251,7 @@ class DownloadEngine:
             for th in self._worker_threads:
                 th.join()
 
-            failed_count = sum(1 for t in all_tasks if t.needs_retry)
+            failed_count = sum(1 for t in all_tasks if t.selected and t.needs_retry)
             if self.stop_event.is_set():
                 final_state = "已终止"
                 self.log("下载已终止。")

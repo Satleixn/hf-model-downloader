@@ -37,12 +37,13 @@ class VerifyEngine:
         self._thread: Optional[threading.Thread] = None
 
     def start(self, tasks: List[FileTask], save_dir: str, workers: int = 4) -> None:
-        if self.is_running or not tasks:
+        selected_tasks = [t for t in tasks if t.selected]
+        if self.is_running or not selected_tasks:
             return
         self.stop_event.clear()
         self.is_running = True
 
-        for t in tasks:
+        for t in selected_tasks:
             with t.lock:
                 t.verify_state = ""
                 t.verified_bytes = 0
@@ -50,7 +51,7 @@ class VerifyEngine:
 
         self._thread = threading.Thread(
             target=self._run,
-            args=(tasks, save_dir, max(1, workers)),
+            args=(selected_tasks, save_dir, max(1, workers)),
             daemon=True,
         )
         self._thread.start()
