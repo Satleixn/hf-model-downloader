@@ -12,6 +12,7 @@
 
 - **支持任意模型主页链接**：直接粘贴 `https://huggingface.co/owner/model`、分支链接（`/tree/<branch>`）、镜像链接（`https://hf-mirror.com/...`）或 `owner/model` 仓库 ID 均可自动解析。
 - **中英文界面实时切换（默认中文）**：界面右上角提供语言下拉菜单（`中文` / `English`），无需重启即可即时切换全部界面文字。
+- **智能保存目录**：首次启动自动读取**系统默认“下载”文件夹**（支持已迁移的 Windows 下载目录）；点击 **浏览...** 选择的目录会自动记住，若上次保存的目录不存在了，会弹窗提示并自动重设为系统默认下载文件夹。
 - **真断点续传与控制**：基于 HTTP `Range` 分块流式写入 `.part` 临时文件，支持随时**暂停 / 继续 / 终止**，关闭重启软件也不会丢失已下载进度。
 - **一键重试失败（`🔄 重试失败`）**：下载结束后若存在失败文件，或 SHA 校验发现损坏/缺失文件，点击一次即可仅重新下载异常文件（自动清理损坏文件），无需重下整个模型。
 - **一键官方 SHA 校验（`✔ 校验 SHA`）**：
@@ -19,20 +20,19 @@
   - **LFS 大文件**自动对比官方 `SHA-256`，**非 LFS 小文件**自动对比官方 `Git Blob SHA-1`。
   - 既可在下载完成后直接校验，也可输入已有本地目录独立校验历史下载的模型。
 - **镜像与 Token 支持**：内置 `huggingface.co` / `hf-mirror.com` 切换、1–8 并发线程调节，并支持填写可选 `HF Token` 下载受限仓库。
-- **根目录一键启动**：双击根目录 `start.bat` 即可自动检测依赖并静默拉起 GUI 窗口。
 
 ## 快速开始
 
-### 方式一：直接下载 Windows 独立 EXE（免装 Python，一键启动）
-前往 [Releases](https://github.com/Satleixn/hf-model-downloader/releases) 页面下载 **`HF-Model-Downloader-v1.0.1-win64.exe`**，双击即可直接运行。
+### 方式一：直接下载 Windows 成品包（免装 Python）
+前往 [Releases](https://github.com/Satleixn/hf-model-downloader/releases) 页面（`v1.0.2`）：
+- **绿色便携版 ZIP（推荐）**：下载 **`HF-Model-Downloader-v1.0.2-win64-portable.zip`**，解压后直接运行 `HF-Model-Downloader.exe`。运行时无需向 `%TEMP%` 解压临时目录，启动更快，彻底避免 `Could not create temporary directory!` 报错。
+- **单文件 EXE**：下载 **`HF-Model-Downloader-v1.0.2-win64.exe`**，双击即可启动。
 
-- 默认保存目录：`C:\Users\<用户名>\Downloads`（C 盘下载文件夹）
-- 点击 **浏览...** 选择目录后会自动记住；若下次打开或下载时该路径不存在，会自动弹窗提示重新选择。
-- 采用干净隔离环境构建且**不使用 UPX 压缩**（最大程度降低杀毒软件误报），附带完整版本元数据与官方 SHA-256 校验值；也可运行 `python packaging/build_exe.py` 自行本地构建。
+两个版本均**禁用 UPX 压缩**（最大程度降低杀毒软件误报），内置 Windows 版本元数据与自定义图标，并在 Release 页面附带官方 SHA-256 校验值；也可运行 `python packaging/build_exe.py` 本地自行构建。
 
-### 方式二：从源码运行
+### 方式二：从源码运行（完全不触发 SmartScreen）
 - 环境要求：Python 3.9+（自带 `tkinter`）与 `requests`（`pip install -r requirements.txt`）
-- Windows 一键启动：直接双击项目根目录的 **`start.bat`**。
+- Windows 一键启动：通过 `git clone https://github.com/Satleixn/hf-model-downloader.git` 克隆后，直接双击根目录的 **`start.bat`**。
 - 命令行启动：
 ```bash
 pip install -r requirements.txt
@@ -41,8 +41,18 @@ python app.py
 
 支持通过参数预填模型链接、保存目录与界面语言：
 ```bash
-python app.py --url "https://huggingface.co/owner/model" --dir "H:\Models" --lang zh --autostart
+python app.py --url "https://huggingface.co/owner/model" --dir "D:\Models" --lang zh --autostart
 ```
+
+## Windows SmartScreen 与常见问题
+
+- **为什么首次运行下载的 `.exe` 可能会弹出 Windows SmartScreen 提示？**
+  Windows 会为从浏览器下载的未购买商业代码签名证书的开源 `.exe` 加上“来自互联网”标记并弹出 SmartScreen 提示。
+- **安全运行方法**：
+  1. 在提示窗点击 **更多信息 → 仍要运行**（或在运行/解压前，右键下载的 `.zip`/`.exe` → **属性** → 勾选底部的 **解除锁定**）。
+  2. 或采用 `git clone` + 双击 `start.bat` 源码方式启动，完全不会触发 SmartScreen。
+- **如果单文件版出现 `Could not create temporary directory!`？**
+  请改用同版本的 **`HF-Model-Downloader-v1.0.2-win64-portable.zip`** 绿色便携版即可彻底解决。
 
 ## 运行测试
 

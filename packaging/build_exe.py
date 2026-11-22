@@ -1,18 +1,18 @@
-"""Reproducible, slim, no-UPX Windows EXE build script for HF Model Downloader."""
+"""Reproducible, slim, no-UPX Windows build script (onefile EXE + onedir portable ZIP)."""
 
 import hashlib
-import os
 import shutil
 import struct
 import subprocess
 import sys
+import zipfile
 import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 EXE_NAME = f"HF-Model-Downloader-v{VERSION}-win64"
-VENV_DIR = ROOT / ".venv-build"
+PORTABLE_DIR_NAME = f"HF-Model-Downloader-v{VERSION}-win64-portable"
 ICON_PATH = ROOT / "assets" / "app.ico"
 VERSION_INFO_PATH = ROOT / "packaging" / "version_info.txt"
 
@@ -43,7 +43,7 @@ EXCLUDES = [
 
 
 def _make_png(size: int) -> bytes:
-    """Generate a minimalist rounded-square blue/gold download icon as RGBA PNG (no Pillow needed)."""
+    """Generate a minimalist rounded-square blue/gold download icon as RGBA PNG."""
     w = h = size
     rows = []
     cx = (w - 1) / 2.0
@@ -51,11 +51,10 @@ def _make_png(size: int) -> bytes:
     radius = w * 0.44
 
     for y in range(h):
-        row = bytearray([0])  # filter type 0
+        row = bytearray([0])
         ny = (y - cy) / (h / 2.0)
         for x in range(w):
             nx = (x - cx) / (w / 2.0)
-            # Rounded square mask
             dx = max(abs(x - cx) - (radius - w * 0.14), 0.0)
             dy = max(abs(y - cy) - (radius - w * 0.14), 0.0)
             in_bg = (dx * dx + dy * dy) <= (w * 0.16) ** 2
@@ -64,17 +63,15 @@ def _make_png(size: int) -> bytes:
                 row.extend((0, 0, 0, 0))
                 continue
 
-            # Downward arrow + tray in crisp white/gold
             in_shaft = abs(nx) <= 0.13 and -0.42 <= ny <= 0.12
             in_head = 0.02 <= ny <= 0.36 and abs(nx) <= (0.36 - ny) * 1.15
-            in_tray = (0.44 <= ny <= 0.56 and abs(nx) <= 0.44)
+            in_tray = 0.44 <= ny <= 0.56 and abs(nx) <= 0.44
 
             if in_shaft or in_head:
-                row.extend((255, 210, 30, 255))  # HF warm gold
+                row.extend((255, 210, 30, 255))
             elif in_tray:
-                row.extend((255, 255, 255, 255))  # crisp white tray
+                row.extend((255, 255, 255, 255))
             else:
-                # Deep slate-blue gradient
                 t = (ny + 1.0) / 2.0
                 r = int(24 + 14 * (1 - t))
                 g = int(58 + 38 * (1 - t))
@@ -92,7 +89,6 @@ def _make_png(size: int) -> bytes:
 
 
 def ensure_icon(icon_path: Path) -> None:
-    """Create multi-size PNG-backed Windows .ico file if missing."""
     icon_path.parent.mkdir(parents=True, exist_ok=True)
     sizes = [16, 32, 48, 256]
     pngs = [_make_png(s) for s in sizes]
@@ -106,10 +102,8 @@ def ensure_icon(icon_path: Path) -> None:
     icon_path.write_bytes(header + b"".join(entries) + b"".join(pngs))
 
 
-def generate_spec(spec_path: Path) -> None:
-    spec_content = f"""# -*- mode: python ; coding: utf-8 -*-
-from pathlib import Path
-
+def _common_analysis_block() -> str:
+    return f"""# -*- mode: python ; coding: utf-8 -*-
 a = Analysis(
     [r"{str(ROOT / 'app.py')}"],
     pathex=[r"{str(ROOT)}"],
@@ -124,7 +118,6 @@ a = Analysis(
     optimize=1,
 )
 
-# Trim unused Tcl/Tk timezone data, demos, and non-essential locale catalogs
 def _keep_data(entry):
     dest = entry[0].replace("\\\\", "/").lower()
     if "_tcl_data/tzdata/" in dest or "_tcl_data/msgs/" in dest or "_tk_data/demos/" in dest or "_tk_data/msgs/" in dest:
@@ -132,9 +125,12 @@ def _keep_data(entry):
     return True
 
 a.datas = [d for d in a.datas if _keep_data(d)]
-
 pyz = PYZ(a.pure)
+"""
 
+
+def generate_onefile_spec(spec_path: Path) -> None:
+    content = _common_analysis_block() + f"""
 exe = EXE(
     pyz,
     a.scripts,
@@ -158,36 +154,91 @@ exe = EXE(
     version=r"{str(VERSION_INFO_PATH)}",
 )
 """
-    spec_path.write_text(spec_content, encoding="utf-8")
+    spec_path.write_text(content, encoding="utf-8")
+
+
+def generate_onedir_spec(spec_path: Path) -> None:
+    content = _common_analysis_block() + f"""
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="HF-Model-Downloader",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=r"{str(ICON_PATH)}",
+    version=r"{str(VERSION_INFO_PATH)}",
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name={PORTABLE_DIR_NAME!r},
+)
+"""
+    spec_path.write_text(content, encoding="utf-8")
+
+
+def zip_directory(src_dir: Path, zip_path: Path) -> None:
+    if zip_path.exists():
+        zip_path.unlink()
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+        for file_path in sorted(src_dir.rglob("*")):
+            if file_path.is_file():
+                arcname = Path(src_dir.name) / file_path.relative_to(src_dir)
+                zf.write(file_path, arcname.as_posix())
+
+
+def _report_artifact(label: str, path: Path) -> None:
+    sha256 = hashlib.sha256(path.read_bytes()).hexdigest().upper()
+    size_mb = path.stat().st_size / (1024 * 1024)
+    print(f"  [{label}] {path.name} ({size_mb:.2f} MB)")
+    print(f"    SHA-256: {sha256}")
 
 
 def main() -> None:
     ensure_icon(ICON_PATH)
-    print(f"[1/3] Icon ready: {ICON_PATH}")
+    print(f"[1/4] Icon ready: {ICON_PATH}")
 
-    if VENV_DIR.exists():
-        shutil.rmtree(VENV_DIR, ignore_errors=True)
+    onefile_spec = ROOT / f"{EXE_NAME}.spec"
+    onedir_spec = ROOT / f"{PORTABLE_DIR_NAME}.spec"
+    generate_onefile_spec(onefile_spec)
+    generate_onedir_spec(onedir_spec)
 
-    spec_path = ROOT / f"{EXE_NAME}.spec"
-    generate_spec(spec_path)
-
-    print(f"[2/3] Building {EXE_NAME}.exe (no UPX, excluded unused modules, trimmed Tcl/Tk) ...")
+    print(f"[2/4] Building one-file EXE ({EXE_NAME}.exe) ...")
     subprocess.run(
-        [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", str(spec_path)],
+        [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", str(onefile_spec)],
         cwd=str(ROOT),
         check=True,
     )
 
-    exe_path = ROOT / "dist" / f"{EXE_NAME}.exe"
-    if not exe_path.is_file():
-        raise FileNotFoundError(f"Expected EXE not found: {exe_path}")
+    print(f"[3/4] Building portable onedir ZIP ({PORTABLE_DIR_NAME}.zip) ...")
+    subprocess.run(
+        [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", str(onedir_spec)],
+        cwd=str(ROOT),
+        check=True,
+    )
 
-    sha256 = hashlib.sha256(exe_path.read_bytes()).hexdigest().upper()
-    size_mb = exe_path.stat().st_size / (1024 * 1024)
-    print(f"[3/3] Build succeeded!")
-    print(f"      Path   : {exe_path}")
-    print(f"      Size   : {size_mb:.2f} MB")
-    print(f"      SHA-256: {sha256}")
+    portable_dir = ROOT / "dist" / PORTABLE_DIR_NAME
+    portable_zip = ROOT / "dist" / f"{PORTABLE_DIR_NAME}.zip"
+    zip_directory(portable_dir, portable_zip)
+
+    onefile_exe = ROOT / "dist" / f"{EXE_NAME}.exe"
+    print("[4/4] All builds succeeded:")
+    _report_artifact("One-File EXE", onefile_exe)
+    _report_artifact("Portable ZIP", portable_zip)
 
 
 if __name__ == "__main__":

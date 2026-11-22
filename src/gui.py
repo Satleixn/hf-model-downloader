@@ -335,27 +335,29 @@ class HFDownloaderGUI:
             self.workers_var.set(4)
             return 4
 
+    def _reset_to_default_downloads(self, missing_path: str) -> str:
+        default_dir = get_default_downloads_dir()
+        self.save_dir_var.set(default_dir)
+        save_selected_dir(default_dir, self.config_path)
+        self._refresh_disk_info()
+        messagebox.showwarning(
+            self._t("dlg_dir_missing_title"),
+            self._t("dlg_dir_missing_msg", path=missing_path, default_dir=default_dir),
+        )
+        return default_dir
+
     def _check_saved_dir_on_startup(self) -> None:
         missing = self._startup_missing_dir
         self._startup_missing_dir = None
         if missing and not os.path.isdir(missing):
-            messagebox.showwarning(
-                self._t("dlg_dir_missing_title"),
-                self._t("dlg_dir_missing_msg", path=missing),
-            )
-            self._browse_dir()
+            self._reset_to_default_downloads(missing)
 
     def _ensure_base_dir_exists(self) -> bool:
         base_dir = self.save_dir_var.get().strip()
         if base_dir and os.path.isdir(base_dir):
             return True
-        messagebox.showwarning(
-            self._t("dlg_dir_missing_title"),
-            self._t("dlg_dir_missing_msg", path=base_dir or "(empty)"),
-        )
-        self._browse_dir()
-        new_dir = self.save_dir_var.get().strip()
-        return bool(new_dir and os.path.isdir(new_dir))
+        self._reset_to_default_downloads(base_dir or "(empty)")
+        return False
 
     def _browse_dir(self) -> None:
         current = self.save_dir_var.get().strip()
