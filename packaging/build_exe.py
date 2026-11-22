@@ -201,6 +201,51 @@ def zip_directory(src_dir: Path, zip_path: Path) -> None:
                 zf.write(file_path, arcname.as_posix())
 
 
+def _has_low_integrity(path: Path) -> bool:
+    if sys.platform != "win32" or not path.exists():
+        return False
+    res = subprocess.run(
+        ["icacls", str(path)],
+        capture_output=True,
+        text=True,
+        errors="ignore",
+        check=False,
+    )
+    return "Low Mandatory Level" in res.stdout
+
+
+def _ensure_medium_integrity(path: Path) -> None:
+    """Try to reset Medium integrity on Windows; warn clearly if elevation is required."""
+    if sys.platform != "win32" or not path.exists():
+        return
+    if not _has_low_integrity(path):
+        return
+    level = "(OI)(CI)M" if path.is_dir() else "M"
+    res = subprocess.run(
+        ["icacls", str(path), "/setintegritylevel", level],
+        capture_output=True,
+        text=True,
+        errors="ignore",
+        check=False,
+    )
+    if res.returncode == 0 and path.is_dir():
+        subprocess.run(
+            ["icacls", str(path), "/setintegritylevel", "M", "/T", "/Q"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    elif _has_low_integrity(path):
+        print(
+            f"[WARNING] {path} inherited Windows 'Low Mandatory Level' from a parent folder, "
+            "and elevating its integrity label requires Administrator privileges.\n"
+            "          Running an EXE with Low Mandatory Level will trigger "
+            "'Could not create temporary directory!'.\n"
+            f'          Fix in an Administrator PowerShell: icacls "{ROOT}" /setintegritylevel "(OI)(CI)M" /T\n'
+            "          Or copy the EXE to a normal folder (e.g. Downloads) before launching."
+        )
+
+
 def _report_artifact(label: str, path: Path) -> None:
     sha256 = hashlib.sha256(path.read_bytes()).hexdigest().upper()
     size_mb = path.stat().st_size / (1024 * 1024)
@@ -217,6 +262,9 @@ def main() -> None:
     generate_onefile_spec(onefile_spec)
     generate_onedir_spec(onedir_spec)
 
+    dist_dir = ROOT / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+
     print(f"[2/4] Building one-file EXE ({EXE_NAME}.exe) ...")
     subprocess.run(
         [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", str(onefile_spec)],
@@ -231,11 +279,12 @@ def main() -> None:
         check=True,
     )
 
-    portable_dir = ROOT / "dist" / PORTABLE_DIR_NAME
-    portable_zip = ROOT / "dist" / f"{PORTABLE_DIR_NAME}.zip"
+    onefile_exe = dist_dir / f"{EXE_NAME}.exe"
+    portable_dir = dist_dir / PORTABLE_DIR_NAME
+    portable_zip = dist_dir / f"{PORTABLE_DIR_NAME}.zip"
     zip_directory(portable_dir, portable_zip)
+    _ensure_medium_integrity(dist_dir)
 
-    onefile_exe = ROOT / "dist" / f"{EXE_NAME}.exe"
     print("[4/4] All builds succeeded:")
     _report_artifact("One-File EXE", onefile_exe)
     _report_artifact("Portable ZIP", portable_zip)
